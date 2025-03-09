@@ -511,20 +511,90 @@ export class StackOverflowServer {
   }
 
   private async handleSearchByTags(args: SearchByTagsInput) {
-    const results = await this.searchStackOverflow("", args.tags, {
-      minScore: args.minScore,
-      limit: args.limit,
-      includeComments: args.includeComments,
+    const params = new URLSearchParams({
+      site: "stackoverflow",
+      sort: "votes",
+      order: "desc",
+      filter: "!nKzQUR30W7",
+      tagged: args.tags.join(";"),
+      ...(args.limit && { pagesize: args.limit.toString() }),
     });
 
-    return {
-      content: [
-        {
-          type: "text",
-          text: this.formatResponse(results, args.responseFormat),
-        },
-      ],
-    };
+    if (this.apiKey) {
+      params.append("key", this.apiKey);
+    }
+
+    if (this.accessToken) {
+      params.append("access_token", this.accessToken);
+    }
+
+    try {
+      const response = await this.withRateLimit(() =>
+        fetch(`${STACKOVERFLOW_API}/questions?${params}`)
+      );
+
+      if (!response.ok) {
+        const errorData = (await response.json()) as ApiErrorResponse;
+        throw new McpError(
+          ErrorCode.InvalidRequest,
+          `Stack Overflow API error: ${errorData.error_message} (${errorData.error_id})`
+        );
+      }
+
+      const data = await response.json();
+      const results: SearchResult[] = [];
+
+      for (const question of data.items) {
+        if (args.minScore && question.score < args.minScore) {
+          continue;
+        }
+
+        const answers = await this.fetchAnswers(question.question_id);
+        let comments: SearchResultComments | undefined;
+
+        if (args.includeComments) {
+          const answersMap: { [key: number]: StackOverflowComment[] } = {};
+          comments = {
+            question: await this.fetchComments(question.question_id),
+            answers: answersMap,
+          };
+
+          for (const answer of answers) {
+            if (answer.answer_id !== undefined) {
+              comments.answers[answer.answer_id] = await this.fetchComments(
+                answer.answer_id
+              );
+            }
+          }
+        }
+
+        results.push({
+          question,
+          answers,
+          ...(args.includeComments && { comments }),
+        });
+      }
+
+      return {
+        content: [
+          {
+            type: "text",
+            text: this.formatResponse(results, args.responseFormat),
+          },
+        ],
+      };
+    } catch (error) {
+      if (error instanceof McpError) {
+        throw error;
+      }
+
+      throw new McpError(
+        ErrorCode.InternalError,
+        `Failed to search Stack Overflow: ${
+          error instanceof Error ? error.message : String(error)
+        }`
+      );
+    }
   }
 
   private async handleAnalyzeStackTrace(args: StackTraceInput) {

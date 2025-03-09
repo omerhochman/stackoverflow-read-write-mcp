@@ -120,6 +120,51 @@ describe("Stack Exchange API Integration", () => {
     expect(results[0].question.question_id).toBe(12345);
     expect(results[0].answers.length).toBe(1);
     expect(results[0].answers[0].answer_id).toBe(67890);
+
+    // Verify the API was called with correct parameters
+    const firstCallUrl = mockFetch.mock.calls[0][0] as string;
+    const url = new URL(firstCallUrl);
+    expect(url.pathname).toBe("/2.3/search/advanced");
+    expect(url.searchParams.get("q")).toBe("test query");
+    expect(url.searchParams.get("site")).toBe("stackoverflow");
+  });
+
+  test("should fetch questions by tags from Stack Overflow API", async () => {
+    // Mock the API responses
+    mockFetch
+      .mockImplementationOnce(() =>
+        Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve(mockQuestionResponse),
+        } as Response)
+      )
+      .mockImplementationOnce(() =>
+        Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve(mockAnswersResponse),
+        } as Response)
+      );
+
+    // Call the search by tags method
+    const result = await (server as any).handleSearchByTags({
+      tags: ["javascript"],
+      limit: 1,
+      responseFormat: "json",
+    });
+
+    // Verify the API was called with correct parameters
+    const firstCallUrl = mockFetch.mock.calls[0][0] as string;
+    const url = new URL(firstCallUrl);
+    expect(url.pathname).toBe("/2.3/questions");
+    expect(url.searchParams.get("tagged")).toBe("javascript");
+    expect(url.searchParams.get("site")).toBe("stackoverflow");
+    expect(url.searchParams.get("filter")).toBe("!nKzQUR30W7");
+    expect(url.searchParams.get("pagesize")).toBe("1");
+
+    // Verify the response
+    expect(result.content[0].type).toBe("text");
+    const parsedResponse = JSON.parse(result.content[0].text);
+    expect(parsedResponse[0].question.question_id).toBe(12345);
   });
 
   test("should handle API errors gracefully", async () => {
