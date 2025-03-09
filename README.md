@@ -16,7 +16,7 @@ A Model Context Protocol server for querying Stack Overflow. This server helps A
 1. **Clone and Install Dependencies**
 
 ```bash
-git clone <repository-url>
+git clone https://github.com/gscalzo/stackoverflow-mcp.git
 cd stackoverflow-mcp
 npm install
 ```
