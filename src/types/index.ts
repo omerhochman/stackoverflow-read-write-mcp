@@ -70,3 +70,12 @@ export interface SearchResult {
   answers: StackOverflowAnswer[];
   comments?: SearchResultComments;
 }
+
+/**
+ * Interface for Stack Exchange API error responses
+ */
+export interface ApiErrorResponse {
+  error_id: number;
+  error_name: string;
+  error_message: string;
+}

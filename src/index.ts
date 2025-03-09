@@ -7,7 +7,6 @@ import {
   ListToolsRequestSchema,
   McpError,
 } from "@modelcontextprotocol/sdk/types.js";
-import axios from "axios";
 import {
   SearchByErrorInput,
   SearchByTagsInput,
@@ -17,14 +16,25 @@ import {
   StackOverflowAnswer,
   StackOverflowComment,
   SearchResultComments,
+  ApiErrorResponse,
 } from "./types/index.js";
 
 const STACKOVERFLOW_API = "https://api.stackexchange.com/2.3";
+// Default custom filter that includes bodies, scores, and other essential fields
+const DEFAULT_FILTER = "!*MZqiDl8Y0c)yVzXS"; // Custom filter for questions with bodies
+const ANSWER_FILTER = "!*MZqiDl8Y0c)yVzXS"; // Custom filter for answers with bodies
+const COMMENT_FILTER = "!*Mg-gxeRLu"; // Custom filter for comments
 
-class StackOverflowServer {
+// Rate limiting configuration
+const MAX_REQUESTS_PER_WINDOW = 30; // Maximum requests per window
+const RATE_LIMIT_WINDOW_MS = 60000; // Window size in milliseconds (1 minute)
+const RETRY_AFTER_MS = 2000; // Time to wait before retrying after rate limit
+
+export class StackOverflowServer {
   private server: Server;
   private apiKey?: string;
   private accessToken?: string;
+  private requestTimestamps: number[] = []; // Track request timestamps for rate limiting
 
   constructor() {
     this.server = new Server(
@@ -201,6 +211,51 @@ class StackOverflowServer {
     });
   }
 
+  private checkRateLimit(): boolean {
+    const now = Date.now();
+    // Remove timestamps outside the window
+    this.requestTimestamps = this.requestTimestamps.filter(
+      (timestamp) => now - timestamp < RATE_LIMIT_WINDOW_MS
+    );
+
+    if (this.requestTimestamps.length >= MAX_REQUESTS_PER_WINDOW) {
+      return false;
+    }
+
+    this.requestTimestamps.push(now);
+    return true;
+  }
+
+  private async withRateLimit<T>(
+    fn: () => Promise<T>,
+    retries = 3
+  ): Promise<T> {
+    if (!this.checkRateLimit()) {
+      // Exceeded rate limit, wait before retrying
+      console.warn("Rate limit exceeded, waiting before retry...");
+      await new Promise((resolve) => setTimeout(resolve, RETRY_AFTER_MS));
+      return this.withRateLimit(fn, retries);
+    }
+
+    try {
+      return await fn();
+    } catch (error) {
+      if (
+        retries > 0 &&
+        ((error instanceof Error && error.message.includes("429")) ||
+          (typeof error === "object" &&
+            error !== null &&
+            "status" in error &&
+            error.status === 429))
+      ) {
+        console.warn("Rate limit hit (429), retrying after delay...");
+        await new Promise((resolve) => setTimeout(resolve, RETRY_AFTER_MS));
+        return this.withRateLimit(fn, retries - 1);
+      }
+      throw error;
+    }
+  }
+
   private async searchStackOverflow(
     query: string,
     tags?: string[],
@@ -214,7 +269,7 @@ class StackOverflowServer {
       site: "stackoverflow",
       sort: "votes",
       order: "desc",
-      filter: "withbody",
+      filter: DEFAULT_FILTER,
       q: query,
       ...(tags && { tagged: tags.join(";") }),
       ...(options.limit && { pagesize: options.limit.toString() }),
@@ -229,12 +284,22 @@ class StackOverflowServer {
     }
 
     try {
-      const response = await axios.get(
-        `${STACKOVERFLOW_API}/search/advanced?${params}`
+      const response = await this.withRateLimit(() =>
+        fetch(`${STACKOVERFLOW_API}/search/advanced?${params}`)
       );
 
+      if (!response.ok) {
+        const errorData = (await response.json()) as ApiErrorResponse;
+        throw new McpError(
+          ErrorCode.InvalidRequest,
+          `Stack Overflow API error: ${errorData.error_message} (${errorData.error_id})`
+        );
+      }
+
+      const data = await response.json();
       const results: SearchResult[] = [];
-      for (const question of response.data.items) {
+
+      for (const question of data.items) {
         if (options.minScore && question.score < options.minScore) {
           continue;
         }
@@ -267,9 +332,16 @@ class StackOverflowServer {
 
       return results;
     } catch (error) {
+      // Handle generic errors
+      if (error instanceof McpError) {
+        throw error;
+      }
+
       throw new McpError(
         ErrorCode.InternalError,
-        `Stack Overflow API error: ${error}`
+        `Failed to search Stack Overflow: ${
+          error instanceof Error ? error.message : String(error)
+        }`
       );
     }
   }
@@ -279,9 +351,9 @@ class StackOverflowServer {
   ): Promise<StackOverflowAnswer[]> {
     const params = new URLSearchParams({
       site: "stackoverflow",
+      filter: ANSWER_FILTER,
       sort: "votes",
       order: "desc",
-      filter: "withbody",
     });
 
     if (this.apiKey) {
@@ -292,15 +364,39 @@ class StackOverflowServer {
       params.append("access_token", this.accessToken);
     }
 
-    const response = await axios.get(
-      `${STACKOVERFLOW_API}/questions/${questionId}/answers?${params}`
-    );
-    return response.data.items;
+    try {
+      const response = await this.withRateLimit(() =>
+        fetch(`${STACKOVERFLOW_API}/questions/${questionId}/answers?${params}`)
+      );
+
+      if (!response.ok) {
+        const errorData = (await response.json()) as ApiErrorResponse;
+        throw new McpError(
+          ErrorCode.InvalidRequest,
+          `Stack Overflow API error: ${errorData.error_message} (${errorData.error_id})`
+        );
+      }
+
+      const data = await response.json();
+      return data.items || [];
+    } catch (error) {
+      if (error instanceof McpError) {
+        throw error;
+      }
+
+      throw new McpError(
+        ErrorCode.InternalError,
+        `Failed to fetch answers: ${
+          error instanceof Error ? error.message : String(error)
+        }`
+      );
+    }
   }
 
   private async fetchComments(postId: number): Promise<StackOverflowComment[]> {
     const params = new URLSearchParams({
       site: "stackoverflow",
+      filter: COMMENT_FILTER,
       sort: "votes",
       order: "desc",
     });
@@ -313,10 +409,33 @@ class StackOverflowServer {
       params.append("access_token", this.accessToken);
     }
 
-    const response = await axios.get(
-      `${STACKOVERFLOW_API}/posts/${postId}/comments?${params}`
-    );
-    return response.data.items;
+    try {
+      const response = await this.withRateLimit(() =>
+        fetch(`${STACKOVERFLOW_API}/posts/${postId}/comments?${params}`)
+      );
+
+      if (!response.ok) {
+        const errorData = (await response.json()) as ApiErrorResponse;
+        throw new McpError(
+          ErrorCode.InvalidRequest,
+          `Stack Overflow API error: ${errorData.error_message} (${errorData.error_id})`
+        );
+      }
+
+      const data = await response.json();
+      return data.items || [];
+    } catch (error) {
+      if (error instanceof McpError) {
+        throw error;
+      }
+
+      throw new McpError(
+        ErrorCode.InternalError,
+        `Failed to fetch comments: ${
+          error instanceof Error ? error.message : String(error)
+        }`
+      );
+    }
   }
 
   private formatResponse(
