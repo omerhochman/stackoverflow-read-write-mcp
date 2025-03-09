@@ -1,8 +1,20 @@
 {
-  "name": "stackoverflow-mcp",
+  "name": "@gscalzo/stackoverflow-mcp",
   "version": "0.1.0",
   "description": "A MCP server for querying Stack Overflow.",
-  "private": true,
+  "author": "Giordano Scalzo",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/gscalzo/stackoverflow-mcp"
+  },
+  "keywords": [
+    "mcp",
+    "stackoverflow",
+    "ai",
+    "search",
+    "model-context-protocol"
+  ],
   "type": "module",
   "bin": {
     "stackoverflow-mcp": "./build/index.js"

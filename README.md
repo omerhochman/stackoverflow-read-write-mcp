@@ -13,21 +13,19 @@ A Model Context Protocol server for querying Stack Overflow. This server helps A
 
 ## Installation
 
-1. **Clone and Install Dependencies**
+You can run the server directly using npx:
 
 ```bash
-git clone https://github.com/gscalzo/stackoverflow-mcp.git
-cd stackoverflow-mcp
-npm install
+npx -y @gscalzo/stackoverflow-mcp
 ```
 
-2. **Build the Server**
+Or install it globally:
 
 ```bash
-npm run build
+npm install -g @gscalzo/stackoverflow-mcp
 ```
 
-3. **Configure the Server**
+### Configure the Server
 
 Create or modify your MCP settings file:
 
@@ -40,8 +38,8 @@ Add the following configuration:
 {
   "mcpServers": {
     "stackoverflow": {
-      "command": "node",
-      "args": ["path/to/stackoverflow-mcp/build/index.js"],
+      "command": "npx",
+      "args": ["-y", "@gscalzo/stackoverflow-mcp"],
       "env": {
         "STACKOVERFLOW_API_KEY": "your-api-key-optional"
       },
