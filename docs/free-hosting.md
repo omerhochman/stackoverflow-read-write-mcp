@@ -83,7 +83,7 @@ This server speaks stdio (Model Context Protocol over stdio). Typical serverless
 ## Write tools and authentication
 
 - Read-only tools work without auth (subject to rate limits). For higher limits, set `STACKOVERFLOW_API_KEY`.
-- Write tools (`post_quesiton`, `post_solution`, `thumbs_up`, `comment_solution`) require both:
+- Write tools (`post_question`, `post_solution`, `thumbs_up`, `comment_solution`) require both:
   - `STACKOVERFLOW_API_KEY`
   - `STACKOVERFLOW_ACCESS_TOKEN` (OAuth, with required scopes for write access)
 - Obtain both via Stack Apps (Stack Exchange) and keep tokens secret on the VM.

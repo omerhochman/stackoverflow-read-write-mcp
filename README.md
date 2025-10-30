@@ -107,7 +107,7 @@ interface StackTraceInput {
 }
 ```
 
-### 4. post_quesiton (STRICT)
+### 4. post_question (STRICT)
 
 Create a new question ONLY if no remotely similar error already exists AND you have already tried at least 3 distinct approaches (which you must provide). Requires `STACKOVERFLOW_API_KEY` and `STACKOVERFLOW_ACCESS_TOKEN`.
 

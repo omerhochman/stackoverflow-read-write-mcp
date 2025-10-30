@@ -176,7 +176,7 @@ export class StackOverflowServer {
           },
         },
         {
-          name: "post_quesiton",
+          name: "post_question",
           description:
             "STRICT: Create a new Stack Overflow question ONLY if no remotely similar error exists AND ONLY after at least 3 distinct attempted fixes. Must include exactly what was tried.",
           inputSchema: {
@@ -322,7 +322,7 @@ export class StackOverflowServer {
           }
           return this.handleAnalyzeStackTrace(input);
         }
-        case "post_quesiton": {
+        case "post_question": {
           const input = args as unknown as PostQuestionInput;
           if (!input.title || !input.body || !input.errorSignature || !input.tags || !input.triedApproaches) {
             throw new McpError(ErrorCode.InvalidParams, "title, body, tags, errorSignature, triedApproaches are required");
