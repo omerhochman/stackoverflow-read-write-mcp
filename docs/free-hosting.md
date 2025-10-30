@@ -119,6 +119,30 @@ This server speaks stdio (Model Context Protocol over stdio). Typical serverless
   - `STACKOVERFLOW_ACCESS_TOKEN` (OAuth, with required scopes for write access)
 - Obtain both via Stack Apps (Stack Exchange) and keep tokens secret on the VM.
 
+### How to obtain a Stack Overflow API key and access token
+
+1) Create an application on Stack Apps to get your API key ("key")
+- Go to the Stack Apps portal: [Create an application](https://stackapps.com/apps/oauth/register)
+- Fill in minimal fields (name, description, and an OAuth domain you control if you plan to do OAuth).
+- After creation, note the displayed App Key — use this as `STACKOVERFLOW_API_KEY`.
+
+2) Get an OAuth access token for write tools
+- Overview docs: [Authentication (Stack Exchange API)](https://api.stackexchange.com/docs/authentication)
+- Choose a flow:
+  - Implicit flow (quick testing): returns a short‑lived token to your browser via `redirect_uri`.
+  - Explicit flow (recommended): exchanges a code server‑side for a token. Use when you can host a small callback endpoint locally.
+- Scopes: request appropriate scopes for write access as required by your use case (see the docs above).
+- Practical options:
+  - Use a local redirect URI (e.g., `http://127.0.0.1:PORT/callback`) while running a tiny local HTTP listener to receive the token, then copy it into your MCP settings (passed via env over SSH).
+  - For quick experiments, consult the docs’ examples/tools to complete the flow and copy the resulting `access_token`.
+
+3) Pass credentials per‑client, at launch (no secrets stored on the VM)
+```bash
+ssh -T USER@EXTERNAL_IP \
+  env STACKOVERFLOW_API_KEY=YOUR_KEY STACKOVERFLOW_ACCESS_TOKEN=YOUR_TOKEN \
+  npx -y @gscalzo/stackoverflow-mcp
+```
+
 ## Operating tips
 
 - Keep your VM updated (`sudo apt update && sudo apt upgrade -y`).
