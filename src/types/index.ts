@@ -71,6 +71,32 @@ export interface SearchResult {
   comments?: SearchResultComments;
 }
 
+// Inputs for write/vote tools
+export interface PostQuestionInput {
+  title: string;
+  body: string;
+  tags: string[];
+  errorSignature: string; // succinct error summary used to check duplicates
+  triedApproaches: string[]; // must include at least 3 attempted fixes
+}
+
+export interface PostSolutionInput {
+  questionId: number;
+  body: string;
+  confirmedResolved: boolean; // only true if the solution fixed the issue
+  evidence: string[]; // references: test results, logs, reproduction, links
+}
+
+export interface ThumbsUpInput {
+  postId: number; // question or answer id
+  confirmedFixed: boolean; // only proceed if true
+}
+
+export interface CommentSolutionInput {
+  questionId: number;
+  body: string; // constructive comment with context
+}
+
 /**
  * Interface for Stack Exchange API error responses
  */
