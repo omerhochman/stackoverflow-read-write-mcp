@@ -17,6 +17,10 @@ import {
   StackOverflowComment,
   SearchResultComments,
   ApiErrorResponse,
+  PostQuestionInput,
+  PostSolutionInput,
+  ThumbsUpInput,
+  CommentSolutionInput,
 } from "./types/index.js";
 
 const STACKOVERFLOW_API = "https://api.stackexchange.com/2.3";
@@ -48,6 +52,10 @@ export class StackOverflowServer {
         },
       }
     );
+
+    // Read optional auth from environment
+    this.apiKey = process.env.STACKOVERFLOW_API_KEY;
+    this.accessToken = process.env.STACKOVERFLOW_ACCESS_TOKEN;
 
     this.setupTools();
     this.setupErrorHandling();
@@ -167,6 +175,115 @@ export class StackOverflowServer {
             required: ["stackTrace", "language"],
           },
         },
+        {
+          name: "post_question",
+          description:
+            "STRICT: Create a new Stack Overflow question ONLY if no remotely similar error exists AND ONLY after at least 3 distinct attempted fixes. Must include exactly what was tried.",
+          inputSchema: {
+            type: "object",
+            properties: {
+              title: { type: "string", description: "Concise question title" },
+              body: {
+                type: "string",
+                description:
+                  "Full markdown body including problem context and minimal repro",
+              },
+              tags: {
+                type: "array",
+                items: { type: "string" },
+                description: "Up to 5 tags relevant to the question",
+              },
+              errorSignature: {
+                type: "string",
+                description:
+                  "Short error signature used to check for duplicates (e.g., exact error line)",
+              },
+              triedApproaches: {
+                type: "array",
+                items: { type: "string" },
+                minItems: 3,
+                description:
+                  "At least 3 distinct approaches already attempted, each described",
+              },
+            },
+            required: [
+              "title",
+              "body",
+              "tags",
+              "errorSignature",
+              "triedApproaches",
+            ],
+          },
+        },
+        {
+          name: "post_solution",
+          description:
+            "STRICT: Post an answer ONLY if no similar solution exists, the issue is confirmed resolved, AND concrete evidence (tests/logs/repro) is provided.",
+          inputSchema: {
+            type: "object",
+            properties: {
+              questionId: { type: "number", description: "Target question ID" },
+              body: {
+                type: "string",
+                description:
+                  "Markdown answer including steps and rationale; include code blocks",
+              },
+              confirmedResolved: {
+                type: "boolean",
+                description:
+                  "Must be true only if this solution fixed the issue",
+              },
+              evidence: {
+                type: "array",
+                items: { type: "string" },
+                minItems: 1,
+                description:
+                  "Evidence references: passing tests, logs, repo links, repro cases",
+              },
+            },
+            required: ["questionId", "body", "confirmedResolved", "evidence"],
+          },
+        },
+        {
+          name: "thumbs_up",
+          description:
+            "STRICT: Upvote ONLY when a solution demonstrably fixed the issue in the context of the question.",
+          inputSchema: {
+            type: "object",
+            properties: {
+              postId: {
+                type: "number",
+                description: "ID of the answer or question to upvote",
+              },
+              confirmedFixed: {
+                type: "boolean",
+                description:
+                  "Must be true only if the solution actually fixed the issue",
+              },
+            },
+            required: ["postId", "confirmedFixed"],
+          },
+        },
+        {
+          name: "comment_solution",
+          description:
+            "STRICT: Comment ONLY on a question that currently has no accepted solution, to add clarifications or progress context.",
+          inputSchema: {
+            type: "object",
+            properties: {
+              questionId: {
+                type: "number",
+                description: "Question ID to comment on (no accepted answer)",
+              },
+              body: {
+                type: "string",
+                description:
+                  "Concise, constructive comment with additional context or findings",
+              },
+            },
+            required: ["questionId", "body"],
+          },
+        },
       ],
     }));
 
@@ -204,6 +321,37 @@ export class StackOverflowServer {
             );
           }
           return this.handleAnalyzeStackTrace(input);
+        }
+        case "post_question": {
+          const input = args as unknown as PostQuestionInput;
+          if (!input.title || !input.body || !input.errorSignature || !input.tags || !input.triedApproaches) {
+            throw new McpError(ErrorCode.InvalidParams, "title, body, tags, errorSignature, triedApproaches are required");
+          }
+          if (!Array.isArray(input.triedApproaches) || input.triedApproaches.length < 3) {
+            throw new McpError(ErrorCode.InvalidParams, "At least 3 triedApproaches are required");
+          }
+          return this.handlePostQuestion(input);
+        }
+        case "post_solution": {
+          const input = args as unknown as PostSolutionInput;
+          if (!input.questionId || !input.body) {
+            throw new McpError(ErrorCode.InvalidParams, "questionId and body are required");
+          }
+          return this.handlePostSolution(input);
+        }
+        case "thumbs_up": {
+          const input = args as unknown as ThumbsUpInput;
+          if (!input.postId) {
+            throw new McpError(ErrorCode.InvalidParams, "postId is required");
+          }
+          return this.handleThumbsUp(input);
+        }
+        case "comment_solution": {
+          const input = args as unknown as CommentSolutionInput;
+          if (!input.questionId || !input.body) {
+            throw new McpError(ErrorCode.InvalidParams, "questionId and body are required");
+          }
+          return this.handleCommentSolution(input);
         }
         default:
           throw new McpError(ErrorCode.MethodNotFound, `Unknown tool: ${name}`);
@@ -436,6 +584,258 @@ export class StackOverflowServer {
         }`
       );
     }
+  }
+
+  private async fetchQuestion(questionId: number): Promise<StackOverflowQuestion | undefined> {
+    const params = new URLSearchParams({
+      site: "stackoverflow",
+      filter: DEFAULT_FILTER,
+    });
+
+    if (this.apiKey) params.append("key", this.apiKey);
+    if (this.accessToken) params.append("access_token", this.accessToken);
+
+    const response = await this.withRateLimit(() =>
+      fetch(`${STACKOVERFLOW_API}/questions/${questionId}?${params}`)
+    );
+    if (!response.ok) {
+      const errorData = (await response.json()) as ApiErrorResponse;
+      throw new McpError(
+        ErrorCode.InvalidRequest,
+        `Stack Overflow API error: ${errorData.error_message} (${errorData.error_id})`
+      );
+    }
+    const data = await response.json();
+    return (data.items && data.items[0]) || undefined;
+  }
+
+  private ensureWriteAccess() {
+    if (!this.apiKey || !this.accessToken) {
+      throw new McpError(
+        ErrorCode.InvalidRequest,
+        "Write operations require STACKOVERFLOW_API_KEY and STACKOVERFLOW_ACCESS_TOKEN"
+      );
+    }
+  }
+
+  private async handlePostQuestion(input: PostQuestionInput) {
+    // Enforce strict policy: require 3+ approaches and no similar existing results
+    const similar = await this.searchStackOverflow(input.errorSignature, input.tags, {
+      minScore: 0,
+      limit: 3,
+      includeComments: false,
+    });
+    if (similar.length > 0) {
+      throw new McpError(
+        ErrorCode.InvalidRequest,
+        "Refusing to post: similar questions already exist for the provided errorSignature"
+      );
+    }
+
+    this.ensureWriteAccess();
+
+    const params = new URLSearchParams({
+      site: "stackoverflow",
+      title: input.title,
+      body: input.body,
+      tags: input.tags.join(";"),
+      key: this.apiKey as string,
+      access_token: this.accessToken as string,
+    });
+
+    const response = await this.withRateLimit(() =>
+      fetch(`${STACKOVERFLOW_API}/questions/add`, {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: params,
+      })
+    );
+
+    if (!response.ok) {
+      const errorData = (await response.json()) as ApiErrorResponse;
+      throw new McpError(
+        ErrorCode.InvalidRequest,
+        `Failed to post question: ${errorData.error_message} (${errorData.error_id})`
+      );
+    }
+    const data = await response.json();
+    const created = data.items && data.items[0];
+    return {
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify(
+            {
+              message: "Question posted successfully",
+              id: created?.question_id,
+              link: created?.link,
+              triedApproaches: input.triedApproaches,
+            },
+            null,
+            2
+          ),
+        },
+      ],
+    };
+  }
+
+  private async handlePostSolution(input: PostSolutionInput) {
+    if (!input.confirmedResolved) {
+      throw new McpError(
+        ErrorCode.InvalidRequest,
+        "Refusing to post: confirmedResolved must be true"
+      );
+    }
+    if (!Array.isArray(input.evidence) || input.evidence.length === 0) {
+      throw new McpError(
+        ErrorCode.InvalidParams,
+        "Refusing to post: evidence is required"
+      );
+    }
+
+    // Enforce: do not post if a similar/accepted solution exists (approximation)
+    const question = await this.fetchQuestion(input.questionId);
+    if (!question) {
+      throw new McpError(ErrorCode.InvalidRequest, "Question not found");
+    }
+    if (question.accepted_answer_id || question.answer_count > 0) {
+      throw new McpError(
+        ErrorCode.InvalidRequest,
+        "Refusing to post: the question already has answers (or an accepted one)"
+      );
+    }
+
+    this.ensureWriteAccess();
+
+    const params = new URLSearchParams({
+      site: "stackoverflow",
+      body: input.body,
+      key: this.apiKey as string,
+      access_token: this.accessToken as string,
+    });
+
+    const response = await this.withRateLimit(() =>
+      fetch(`${STACKOVERFLOW_API}/questions/${input.questionId}/answers/add`, {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: params,
+      })
+    );
+
+    if (!response.ok) {
+      const errorData = (await response.json()) as ApiErrorResponse;
+      throw new McpError(
+        ErrorCode.InvalidRequest,
+        `Failed to post answer: ${errorData.error_message} (${errorData.error_id})`
+      );
+    }
+    const data = await response.json();
+    const created = data.items && data.items[0];
+    return {
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify(
+            {
+              message: "Answer posted successfully",
+              id: created?.answer_id,
+              link: created?.link,
+              evidence: input.evidence,
+            },
+            null,
+            2
+          ),
+        },
+      ],
+    };
+  }
+
+  private async handleThumbsUp(input: ThumbsUpInput) {
+    if (!input.confirmedFixed) {
+      throw new McpError(
+        ErrorCode.InvalidRequest,
+        "Refusing to upvote: confirmedFixed must be true"
+      );
+    }
+    this.ensureWriteAccess();
+
+    const params = new URLSearchParams({
+      site: "stackoverflow",
+      key: this.apiKey as string,
+      access_token: this.accessToken as string,
+    });
+
+    const response = await this.withRateLimit(() =>
+      fetch(`${STACKOVERFLOW_API}/posts/${input.postId}/upvote`, {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: params,
+      })
+    );
+    if (!response.ok) {
+      const errorData = (await response.json()) as ApiErrorResponse;
+      throw new McpError(
+        ErrorCode.InvalidRequest,
+        `Failed to upvote: ${errorData.error_message} (${errorData.error_id})`
+      );
+    }
+    return {
+      content: [
+        { type: "text", text: "Upvote submitted successfully" },
+      ],
+    };
+  }
+
+  private async handleCommentSolution(input: CommentSolutionInput) {
+    // Only if the question has no accepted solution
+    const question = await this.fetchQuestion(input.questionId);
+    if (!question) {
+      throw new McpError(ErrorCode.InvalidRequest, "Question not found");
+    }
+    if (question.accepted_answer_id) {
+      throw new McpError(
+        ErrorCode.InvalidRequest,
+        "Refusing to comment: question already has an accepted answer"
+      );
+    }
+
+    this.ensureWriteAccess();
+
+    const params = new URLSearchParams({
+      site: "stackoverflow",
+      body: input.body,
+      key: this.apiKey as string,
+      access_token: this.accessToken as string,
+    });
+
+    const response = await this.withRateLimit(() =>
+      fetch(`${STACKOVERFLOW_API}/posts/${input.questionId}/comments/add`, {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: params,
+      })
+    );
+    if (!response.ok) {
+      const errorData = (await response.json()) as ApiErrorResponse;
+      throw new McpError(
+        ErrorCode.InvalidRequest,
+        `Failed to post comment: ${errorData.error_message} (${errorData.error_id})`
+      );
+    }
+    const data = await response.json();
+    const created = data.items && data.items[0];
+    return {
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify(
+            { message: "Comment posted successfully", id: created?.comment_id },
+            null,
+            2
+          ),
+        },
+      ],
+    };
   }
 
   private formatResponse(
