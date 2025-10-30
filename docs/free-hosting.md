@@ -68,12 +68,15 @@ Optional: pre‑warm the npx package cache:
 # If published on npm (may 404 if unpublished)
 npx -y @gscalzo/stackoverflow-mcp --help || true
 
-# Reliable fallback: install from GitHub and run its bin
+# Reliable fallbacks: install from GitHub and run its bin
+# Original repo
 npx -y --package=github:gscalzo/stackoverflow-mcp stackoverflow-mcp --help || true
+# Your fork (read/write)
+npx -y --package=github:omerhochman/stackoverflow-read-write-mcp stackoverflow-mcp --help || true
 ```
 
 3) Configure your MCP client to use SSH
-Add to your MCP settings (paths vary by client):
+Add to your MCP settings (paths vary by client). Choose one of the GitHub sources:
 ```json
 {
   "mcpServers": {
@@ -90,10 +93,28 @@ Add to your MCP settings (paths vary by client):
   }
 }
 ```
+Or, using your fork:
+```json
+{
+  "mcpServers": {
+    "stackoverflow": {
+      "command": "ssh",
+      "args": [
+        "-T",
+        "USER@EXTERNAL_IP",
+        "npx", "-y", "--package=github:omerhochman/stackoverflow-read-write-mcp", "stackoverflow-mcp"
+      ],
+      "disabled": false,
+      "autoApprove": []
+    }
+  }
+}
+```
 Notes:
 - `-T` disables pseudo‑tty so stdio streams map cleanly.
 - Env vars come from the remote shell (`~/.bashrc`). If you prefer to pass them inline (less secure):
-  - args: `["-T", "USER@EXTERNAL_IP", "env", "STACKOVERFLOW_API_KEY=...", "STACKOVERFLOW_ACCESS_TOKEN=...", "npx", "-y", "--package=github:gscalzo/stackoverflow-mcp", "stackoverflow-mcp"]`
+  - args (original repo): `["-T", "USER@EXTERNAL_IP", "env", "STACKOVERFLOW_API_KEY=...", "STACKOVERFLOW_ACCESS_TOKEN=...", "npx", "-y", "--package=github:gscalzo/stackoverflow-mcp", "stackoverflow-mcp"]`
+  - args (your fork): `["-T", "USER@EXTERNAL_IP", "env", "STACKOVERFLOW_API_KEY=...", "STACKOVERFLOW_ACCESS_TOKEN=...", "npx", "-y", "--package=github:omerhochman/stackoverflow-read-write-mcp", "stackoverflow-mcp"]`
 
 4) Cost controls and Free Tier details
 - The Free Tier is per billing account and doesn’t roll over. Exceeding limits incurs standard charges. See [Budgets and alerts](https://cloud.google.com/billing/docs/how-to/budgets) to avoid surprises.
