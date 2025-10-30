@@ -12,6 +12,13 @@ Google Cloud Free Tier includes one non‑preemptible `e2-micro` VM per month in
 
 1) Create the VM (Compute Engine)
 - If you don’t have one, create a Google Cloud project and enable billing (required for Free Tier usage): [Create, configure, and manage projects](https://cloud.google.com/resource-manager/docs/creating-managing-projects), [Create a Cloud Billing account](https://cloud.google.com/billing/docs/how-to/manage-billing-account).
+- Ensure the correct project is selected:
+  - In the Console UI, select your project from the top project picker.
+  - Or in Cloud Shell/CLI:
+    ```bash
+    gcloud projects list
+    gcloud config set project YOUR_PROJECT_ID
+    ```
 - Open the VM creation page: [Create a VM instance](https://console.cloud.google.com/compute/instancesAdd) and choose:
   - Region: `us-central1`, `us-west1`, or `us-east1` (Free Tier regions)
   - Machine type: `e2-micro`
@@ -22,8 +29,10 @@ Google Cloud Free Tier includes one non‑preemptible `e2-micro` VM per month in
 
 Alternative (one‑liner via Cloud Shell):
 1. Open [Cloud Shell](https://shell.cloud.google.com/?show=terminal&cloudshell=true)
-2. Run (pick a Free Tier zone like `us-central1-a`):
+2. Select your project (replace `YOUR_PROJECT_ID`) and pick a Free Tier zone like `us-central1-a`:
 ```bash
+gcloud projects list
+gcloud config set project YOUR_PROJECT_ID
 gcloud config set compute/zone us-central1-a
 gcloud compute instances create mcp-stackoverflow \
   --machine-type=e2-micro \
